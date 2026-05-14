@@ -4,8 +4,7 @@ import {
     fetchLatestBaileysVersion, 
     makeCacheableSignalKeyStore, 
     DisconnectReason,
-    Browsers,
-    downloadMediaMessage
+    Browsers
 } from 'todleys';
 import P from 'pino';
 import fs from 'fs';
@@ -17,10 +16,6 @@ import CFonts from 'cfonts';
 
 import { config } from './config.js';
 import { logger } from './config/print.js';
-import { pixelHandler } from './pixel.js';
-import { detectHandler } from './comandos/grupos-detect.js';
-import antiLinkHandler from './comandos/grupos-antilink.js';
-import welcomeHandler from './comandos/grupos-welcome.js';
 import { loadAllSubBots } from './sockets/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,7 +25,6 @@ const rl = createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
 global.commands = {};
-global.lastMessageMap = new Map();
 let startTime = Date.now();
 
 const tmpDir = path.join(__dirname, 'tmp');
@@ -52,14 +46,12 @@ global.loadCommands = async () => {
             if (handler && handler.command) {
                 global.commands[file] = handler;
             }
-        } catch (e) {
-            console.error(`Error cargando el comando ${file}:`, e);
-        }
+        } catch (e) {}
     }
 };
 
 async function startBot() {
-    const sessionDir = './sesion_bot';
+    const sessionDir = './session_base';
     if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir);
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
@@ -74,27 +66,19 @@ async function startBot() {
             keys: makeCacheableSignalKeyStore(state.keys, P({ level: 'silent' })),
         },
         browser: Browsers.ubuntu('Chrome'),
-        markOnlineOnConnect: true,
-        generateHighQualityLinkPreview: true,
-        syncFullHistory: false,
-        getMessage: async (key) => { return null }
+        markOnlineOnConnect: true
     });
 
     await global.loadCommands();
 
-    try {
-        detectHandler(conn);
-        welcomeHandler(conn);
-    } catch (e) {}
-
     if (!conn.authState.creds.registered) {
         setTimeout(async () => {
-            let input = await question(chalk.cyan('\n  [?] Introduce tu número con código de país:\n  > '));
+            let input = await question(chalk.white('\n  [?] Ingresa el número para vincular (Ej: 535xxx):\n  > '));
             let phoneNumber = input.replace(/[^0-9]/g, '');
             try {
                 let code = await conn.requestPairingCode(phoneNumber);
                 code = code?.match(/.{1,4}/g)?.join('-') || code;
-                console.log(chalk.black.bgCyan(`\n  CODIGO DE VINCULACIÓN: ${code}  \n`));
+                console.log(chalk.black.bgWhite(`\n  CÓDIGO DE VINCULACIÓN: ${code}  \n`));
             } catch (error) {}
         }, 3000);
     }
@@ -107,14 +91,14 @@ async function startBot() {
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
             if (reason !== DisconnectReason.loggedOut) {
-                setTimeout(() => startBot(), 5000);
+                startBot();
             } else {
                 process.exit();
             }
         } else if (connection === 'open') {
             process.stdout.write('\x1Bc');
-            CFonts.say('AKINAWA-BOT', { font: 'block', align: 'center', colors: ['cyan', 'white'] });
-            console.log(chalk.greenBright.bold(`\n  [✨] ¡AKINAWA CONECTADO!\n  [⌚] Carga: ${((Date.now() - startTime) / 1000).toFixed(2)}s`));
+            CFonts.say('BASE-BOT', { font: 'block', align: 'center', colors: ['white', 'cyan'] });
+            console.log(chalk.white.bold(`\n  [✨] BaseBot conectado correctamente.\n  [⌚] Tiempo de inicio: ${((Date.now() - startTime) / 1000).toFixed(2)}s`));
             await loadAllSubBots(conn);
         }
     });
@@ -160,9 +144,6 @@ async function startBot() {
                 }
             }
         }
-
-        await antiLinkHandler(conn, m);
-        await pixelHandler(conn, m, config);
     });
 }
 
