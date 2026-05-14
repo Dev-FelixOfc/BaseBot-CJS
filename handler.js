@@ -3,9 +3,31 @@ const fs = require('fs');
 const chalk = require('chalk');
 const { database } = require('@Dev-FelixOfc/databaselib');
 
+global.plugins = {};
+const pluginsPath = path.join(__dirname, 'plugins');
+
+const loadPlugins = () => {
+    const files = fs.readdirSync(pluginsPath).filter(file => file.endsWith('.js'));
+    for (let file of files) {
+        try {
+            const filePath = path.join(pluginsPath, file);
+            delete require.cache[require.resolve(filePath)];
+            global.plugins[file] = require(filePath);
+        } catch (e) {
+            console.error(chalk.red(`Error cargando plugin ${file}:`), e);
+        }
+    }
+};
+
+if (fs.existsSync(pluginsPath)) {
+    loadPlugins();
+} else {
+    fs.mkdirSync(pluginsPath);
+}
+
 module.exports = async (conn, m) => {
     try {
-        if (m.key.remoteJid === 'status@broadcast') return;
+        if (!m || m.key.remoteJid === 'status@broadcast') return;
 
         const body = (m.message.conversation || m.message.extendedTextMessage?.text || m.message.imageMessage?.caption || m.message.videoMessage?.caption || '').trim();
         const isCommand = global.prefix.test(body);
@@ -13,16 +35,16 @@ module.exports = async (conn, m) => {
         const command = isCommand ? body.slice(prefix.length).trim().split(/ +/).shift().toLowerCase() : '';
         const args = body.trim().split(/ +/).slice(1);
         const text = args.join(' ');
-        
+
         const from = m.key.remoteJid;
         const isGroup = from.endsWith('@g.us');
         const sender = isGroup ? m.key.participant : m.key.remoteJid;
         const pushname = m.pushName || 'Usuario';
-        
+
         const groupMetadata = isGroup ? await conn.groupMetadata(from).catch(() => ({})) : {};
         const participants = isGroup ? groupMetadata.participants : [];
         const admins = isGroup ? participants.filter(v => v.admin !== null).map(v => v.id) : [];
-        
+
         const isOwner = global.owner.some(o => o[0] + '@s.whatsapp.net' === sender) || m.key.fromMe;
         const isAdmin = isGroup ? admins.includes(sender) : false;
         const isBotAdmin = isGroup ? admins.includes(conn.user.id.split(':')[0] + '@s.whatsapp.net') : false;
@@ -31,22 +53,19 @@ module.exports = async (conn, m) => {
             return conn.sendMessage(from, { text: text }, { quoted: m });
         };
 
-        const pluginsPath = path.join(__dirname, 'plugins');
-        const pluginFiles = fs.readdirSync(pluginsPath).filter(file => file.endsWith('.js'));
+        for (let file in global.plugins) {
+            const plugin = global.plugins[file];
+            if (!plugin) continue;
 
-        for (let file of pluginFiles) {
-            const plugin = require(path.join(pluginsPath, file));
-            
             const isMatch = Array.isArray(plugin.command) 
                 ? plugin.command.includes(command) 
                 : plugin.command === command;
 
             if (isMatch && isCommand) {
-                
                 if (plugin.rowner && !isOwner) {
                     return m.reply(global.settings.owner);
                 }
-                
+
                 if (plugin.group && !isGroup) {
                     return m.reply(global.settings.group);
                 }
@@ -56,7 +75,7 @@ module.exports = async (conn, m) => {
                 }
 
                 if (plugin.botAdmin && !isBotAdmin) {
-                    return m.reply('Necesito ser administrador para ejecutar este comando.');
+                    return m.reply(global.settings.botAdmin);
                 }
 
                 try {
@@ -77,7 +96,7 @@ module.exports = async (conn, m) => {
                     });
                 } catch (e) {
                     console.error(chalk.red(`Error en plugin: ${file}`), e);
-                    m.reply('Ocurrió un error al ejecutar el comando.');
+                    m.reply(global.settings.error);
                 }
                 return;
             }
@@ -85,8 +104,10 @@ module.exports = async (conn, m) => {
 
         if (isGroup && global.db?.data?.chats?.[from]?.antilink) {
             if (body.includes('chat.whatsapp.com') && !isAdmin) {
-                await conn.sendMessage(from, { delete: m.key });
-                await conn.groupParticipantsUpdate(from, [sender], 'remove');
+                if (isBotAdmin) {
+                    await conn.sendMessage(from, { delete: m.key });
+                    await conn.groupParticipantsUpdate(from, [sender], 'remove');
+                }
             }
         }
 
@@ -101,4 +122,5 @@ fs.watchFile(file, () => {
     console.log(chalk.yellowBright(`Update 'handler.js'`));
     delete require.cache[file];
     require(file);
+    loadPlugins();
 });
